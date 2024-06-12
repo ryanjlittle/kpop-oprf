@@ -14,7 +14,7 @@ except ImportError as e:
 
 _as_bytes = lambda x: x if isinstance(x, bytes) else bytes(x, "utf-8")
 
-Ciphersuite = namedtuple("Ciphersuite", ["name", "identifier", "group", "H", "hash"])
+Ciphersuite = namedtuple("Ciphersuite", ["name", "identifier", "group", "H"])
 
 ciphersuite_ristretto255_sha512 = "ristretto255-SHA512"
 ciphersuite_decaf448_shake256 = "decaf448-SHAKE256"
@@ -23,11 +23,11 @@ ciphersuite_p384_sha384 = "P384-SHA384"
 ciphersuite_p521_sha512 = "P521-SHA512"
 
 oprf_ciphersuites = {
-    ciphersuite_ristretto255_sha512: Ciphersuite("OPRF(ristretto255, SHA-512)", ciphersuite_ristretto255_sha512, GroupRistretto255(), hashlib.sha512, lambda x : hashlib.sha512(x).digest()),
-    ciphersuite_decaf448_shake256: Ciphersuite("OPRF(decaf448, SHAKE256)", ciphersuite_decaf448_shake256, GroupDecaf448(), hashlib.shake_256, lambda x : hashlib.shake_256(x).digest(int(64))),
-    ciphersuite_p256_sha256: Ciphersuite("OPRF(P-256, SHA-256)", ciphersuite_p256_sha256, GroupP256(), hashlib.sha256, lambda x : hashlib.sha256(x).digest()),
-    ciphersuite_p384_sha384: Ciphersuite("OPRF(P-384, SHA-384)", ciphersuite_p384_sha384, GroupP384(), hashlib.sha384, lambda x : hashlib.sha384(x).digest()),
-    ciphersuite_p521_sha512: Ciphersuite("OPRF(P-521, SHA-512)", ciphersuite_p521_sha512, GroupP521(), hashlib.sha512, lambda x : hashlib.sha512(x).digest()),
+    ciphersuite_ristretto255_sha512: Ciphersuite("OPRF(ristretto255, SHA-512)", ciphersuite_ristretto255_sha512, GroupRistretto255(), hashlib.sha512),
+    ciphersuite_decaf448_shake256: Ciphersuite("OPRF(decaf448, SHAKE256)", ciphersuite_decaf448_shake256, GroupDecaf448(), hashlib.shake_256),
+    ciphersuite_p256_sha256: Ciphersuite("OPRF(P-256, SHA-256)", ciphersuite_p256_sha256, GroupP256(), hashlib.sha256),
+    ciphersuite_p384_sha384: Ciphersuite("OPRF(P-384, SHA-384)", ciphersuite_p384_sha384, GroupP384(), hashlib.sha384),
+    ciphersuite_p521_sha512: Ciphersuite("OPRF(P-521, SHA-512)", ciphersuite_p521_sha512, GroupP521(), hashlib.sha512),
 }
 
 def identifer_to_suite(identifier):
@@ -35,12 +35,27 @@ def identifer_to_suite(identifier):
         raise Exception("Unknown ciphersuite")
     return oprf_ciphersuites[identifier]
 
+def suitehash(x, suite):
+    if suite == ciphersuite_ristretto255_sha512:
+        return hashlib.sha512(x).digest()
+    elif suite == ciphersuite_decaf448_shake256:
+        return hashlib.shake_256(x).digest(int(64))
+    elif suite == ciphersuite_p256_sha256:
+        return hashlib.sha256(x).digest()
+    elif suite == ciphersuite_p384_sha384:
+        return hashlib.sha384(x).digest()
+    elif suite == ciphersuite_p521_sha512:
+        return hashlib.sha512(x).digest()
+    else:
+        raise Exception("Unknown ciphersuite")
+
 class Context(object):
     def __init__(self, version, mode, identifier):
         self.suite = identifer_to_suite(identifier)
         self.mode = mode
         self.identifier = identifier
-        self.context_string = _as_bytes(version) + I2OSP(self.mode, 1) + _as_bytes("-") + _as_bytes(identifier)
+        self.context_string = _as_bytes(version) + _as_bytes(identifier)
+
 
     def group_domain_separation_tag(self):
         return _as_bytes("HashToGroup-") + self.context_string
@@ -80,7 +95,7 @@ class OPRFClientContext(Context):
             + I2OSP(len(unblinded_element), 2) + unblinded_element \
             + _as_bytes("Finalize")
 
-        return self.suite.hash(finalize_input)
+        return suitehash(finalize_input, self.identifier)
 
 class OPRFServerContext(Context):
     def __init__(self, version, mode, suite, skS, pkS):
@@ -109,7 +124,7 @@ class OPRFServerContext(Context):
             + I2OSP(len(issued_element), 2) + issued_element \
             + _as_bytes("Finalize")
 
-        return self.suite.hash(finalize_input)
+        return suitehash(finalize_input, self.identifier)
 
 class Verifiable(object):
     def compute_composites_inner(self, k, B, Cs, Ds):
@@ -215,7 +230,7 @@ class VOPRFClientContext(OPRFClientContext,Verifiable):
             + I2OSP(len(unblinded_element), 2) + unblinded_element \
             + _as_bytes("Finalize")
 
-        return self.suite.hash(finalize_input)
+        return suitehash(finalize_input, self.identifier)
 
     def finalize_batch(self, xs, blinds, evaluated_elements, blinded_elements, proof, info):
         assert(len(blinds) == len(evaluated_elements))
@@ -229,7 +244,7 @@ class VOPRFClientContext(OPRFClientContext,Verifiable):
                 + I2OSP(len(unblinded_element), 2) + unblinded_element \
                 + _as_bytes("Finalize")
 
-            digest = self.suite.hash(finalize_input)
+            digest = suitehash(finalize_input, self.identifier)
             outputs.append(digest)
 
         return outputs
@@ -341,7 +356,7 @@ class POPRFClientContext(VOPRFClientContext):
             + I2OSP(len(unblinded_element), 2) + unblinded_element \
             + _as_bytes("Finalize")
 
-        return self.suite.hash(finalize_input)
+        return suitehash(finalize_input, self.identifier)
 
     def finalize_batch(self, xs, blinds, evaluated_elements, blinded_elements, proof, info, tweaked_key):
         assert(len(blinds) == len(evaluated_elements))
@@ -356,7 +371,7 @@ class POPRFClientContext(VOPRFClientContext):
                 + I2OSP(len(unblinded_element), 2) + unblinded_element \
                 + _as_bytes("Finalize")
 
-            digest = self.suite.hash(finalize_input)
+            digest = suitehash(finalize_input, self.identifier)
             outputs.append(digest)
 
         return outputs
