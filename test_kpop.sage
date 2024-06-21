@@ -1,11 +1,12 @@
 #!/usr/bin/sage
 # vim: syntax=python
-
+import random
 import sys
 from multiprocessing import Pool
 from time import perf_counter
 import matplotlib.pyplot as plt
 import numpy as np
+import argparse
 
 try:
     from sagelib.test_drng import TestDRNG
@@ -267,59 +268,28 @@ class Protocol(object):
 
 
 mode_map = {
-    MODE_OPRF: "OPRF",
-    MODE_VOPRF: "VOPRF",
-    MODE_POPRF: "POPRF",
-    MODE_KPOP_PUB: "KPOP_PUB",
-    MODE_KPOP_PRIV: "KPOP_PRIV"
+    MODE_KPOP_PUB: "pOPRF",
+    MODE_KPOP_PRIV: "OPRF"
 }
 
-def test():
-
-    N = 100
-    def same_info_different_x():
-        for identifier in test_suites:
-            inputs = [i.to_bytes()*16 for i in range(N)]
-            pub_protocol = Protocol(identifier, MODE_KPOP_PUB, _as_bytes("test info"), inputs)
-            priv_protocol = Protocol(identifier, MODE_KPOP_PRIV, _as_bytes("test info"), inputs)
+def test(num_tests):
+    # This test checks that OPRF mode and pOPRF mode both return the same result when evaluating the same input
+    x_kals = [random.randbytes(16) for _ in range(num_tests)]
+    x_privs = [random.randbytes(16) for _ in range(num_tests)]
+    for identifier in test_suites:
+        for i in range(num_tests):
+            pub_protocol = Protocol(identifier, MODE_KPOP_PUB, x_kals[i], [x_privs[i]])
+            priv_protocol = Protocol(identifier, MODE_KPOP_PRIV, x_kals[i], [x_privs[i]])
             pub_vecs = pub_protocol.run()
             priv_vecs = priv_protocol.run()
+            # Compare outputs
             for (v1, v2) in zip(pub_vecs['vectors'], priv_vecs['vectors']):
-                assert(v1['Output'] == v2['Output'])
+                assert (v1['Output'] == v2['Output'])
+        print(f"Test passed for {identifier}.")
+    print("All test passed!")
 
-    def different_info_same_x():
-        for identifier in test_suites:
-            input = [b'\x00']
-            infos = [_as_bytes(f"test {i}") for i in range(N)]
-            for info in infos:
-                pub_protocol = Protocol(identifier, MODE_KPOP_PUB, info, input)
-                priv_protocol = Protocol(identifier, MODE_KPOP_PRIV, info, input)
-                pub_vecs = pub_protocol.run()
-                priv_vecs = priv_protocol.run()
-                for (v1, v2) in zip(pub_vecs['vectors'], priv_vecs['vectors']):
-                    assert(v1['Output'] == v2['Output'])
-
-    def different_info_different_x():
-        for identifier in test_suites:
-            infos = [_as_bytes(f"test {i}") for i in range(N)]
-            for i, info in enumerate(infos):
-                input = [i.to_bytes()*16]
-                pub_protocol = Protocol(identifier, MODE_KPOP_PUB, info, input)
-                priv_protocol = Protocol(identifier, MODE_KPOP_PRIV, info, input)
-                pub_vecs = pub_protocol.run()
-                priv_vecs = priv_protocol.run()
-                for (v1, v2) in zip(pub_vecs['vectors'], priv_vecs['vectors']):
-                    assert (v1['Output'] == v2['Output'])
-
-    same_info_different_x()
-    print("Test passed: same info different x")
-    different_info_same_x()
-    print("Test passed: different info same x")
-    different_info_different_x()
-    print("Test passed: different info different x")
-
-def time():
-    inputs = [i.to_bytes(2)*8 for i in range(1000)]
+def time(num_trials):
+    inputs = [i.to_bytes(2)*8 for i in range(num_trials)]
     fig, ax = plt.subplots(layout='constrained')
     public_client_time = []
     public_server_time = []
@@ -335,11 +305,11 @@ def time():
             client_times, server_times = protocol.timing_run()
             client_avg_time = np.mean(client_times)
             server_avg_time = np.mean(server_times)
-            client_std_err = np.std(client_times, ddof=1) / np.sqrt(len(inputs))
-            server_std_err = np.std(server_times, ddof=1) / np.sqrt(len(inputs))
+            client_std_err = np.std(client_times, ddof=1) / np.sqrt(num_trials)
+            server_std_err = np.std(server_times, ddof=1) / np.sqrt(num_trials)
             print(f"Average time for {identifier} in {mode_map[mode]} mode:")
-            print(f"\tClient: {client_avg_time} with error {client_std_err}")
-            print(f"\tServer: {server_avg_time} with error {server_std_err}")
+            print(f"\tClient: {1000*client_avg_time:.3f} ms (error = {1000*client_std_err:.3f} ms)")
+            print(f"\tServer: {1000*server_avg_time:.3} ms (error {1000*server_std_err:0.3f} ms)")
 
             if mode == MODE_KPOP_PUB:
                 public_client_time += [client_avg_time]
@@ -374,18 +344,26 @@ def time():
     ax.set_title('K-pop performance')
     ax.legend(ncols=2)
     plt.show()
-def time_multicore():
-    num_trials = 512
+def time_multicore(num_trials, cores):
     inputs = [i.to_bytes(2) * 8 for i in range(num_trials)]
     for suite in test_suites:
+        print(f"Ciphersuite {suite}")
         for mode in [MODE_KPOP_PUB, MODE_KPOP_PRIV]:
-            for num_cores in [1, 2, 4, 8]:
+            print(f"  {mode_map[mode]} mode")
+            for num_cores in cores:
                 protocol = Protocol(suite, mode, _as_bytes("test info"), inputs)
-                print(f"Testing protocol {suite}, mode {mode}, {num_cores} cores")
                 time = protocol.multicore_run(num_cores)
-                print(f"Average time: {time / num_trials}")
+                print(f"    {num_cores} cores, average time: {1000 * time / num_trials:.3f} ms")
 
 if __name__ == "__main__":
-    test()
-    #time()
-    #time_multicore()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--test', type=int, nargs='?', const=100, help='Evaluates K-pop in both OPRF mode and pOPRF mode on random inputs and checks that outputs are the same. You can optionally specify the number of trials (default is 100)')
+    parser.add_argument('--figure', type=int, nargs='?', const=500, help='Produce a graph comparing K-pop evaluation time across all supported ciphersuites. You can optionally specify the number of trials for each measurement (default is 500)')
+    parser.add_argument('--benchmark', type=int, nargs='?', const=512, help='Measure the amortized time of K-pop server work in a multi-processing setting. This will run the K-pop in {1,2,4} parallel cores for each ciphersuite, and output the average amortized time to the console. You can optionally specify the number of trials for each measurement (default is 512)')
+    args = parser.parse_args()
+    if args.test is not None:
+        test(num_tests=args.test)
+    if args.figure is not None:
+        time(num_trials=args.figure)
+    if args.benchmark is not None:
+        time_multicore(num_trials=args.benchmark, cores=[1,2,4])
