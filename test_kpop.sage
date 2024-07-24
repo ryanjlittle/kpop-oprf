@@ -289,8 +289,8 @@ def test(num_tests):
     print("All test passed!")
 
 def time(num_trials):
-    inputs = [i.to_bytes(2)*8 for i in range(num_trials)]
-    fig, ax = plt.subplots(layout='constrained')
+    inputs = [i.to_bytes(2, 'little')*8 for i in range(num_trials)]
+    fig, ax = plt.subplots()
     public_client_time = []
     public_server_time = []
     private_client_time = []
@@ -309,7 +309,7 @@ def time(num_trials):
             server_std_err = np.std(server_times, ddof=1) / np.sqrt(num_trials)
             print(f"Average time for {identifier} in {mode_map[mode]} mode:")
             print(f"\tClient: {1000*client_avg_time:.3f} ms (error = {1000*client_std_err:.3f} ms)")
-            print(f"\tServer: {1000*server_avg_time:.3} ms (error {1000*server_std_err:0.3f} ms)")
+            print(f"\tServer: {1000*server_avg_time:.3} ms (error = {1000*server_std_err:0.3f} ms)")
 
             if mode == MODE_KPOP_PUB:
                 public_client_time += [client_avg_time]
@@ -342,10 +342,14 @@ def time(num_trials):
     ax.set_ylabel('Time (s)')
     ax.set_xticks(x+width, test_suites)
     ax.set_title('K-pop performance')
-    ax.legend(ncols=2)
+    ax.legend()
+
+    filename = "./figure.png"
+    print(f"Runs complete. Saving plot as {filename}.")
+    plt.savefig(filename)
     plt.show()
 def time_multicore(num_trials, cores):
-    inputs = [i.to_bytes(2) * 8 for i in range(num_trials)]
+    inputs = [i.to_bytes(2, 'little') * 8 for i in range(num_trials)]
     for suite in test_suites:
         print(f"Ciphersuite {suite}")
         for mode in [MODE_KPOP_PUB, MODE_KPOP_PRIV]:
